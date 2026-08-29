@@ -1,4 +1,4 @@
-package com.vivek.platform.order.config;
+package com.vivek.platform.inventory.config;
 
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
