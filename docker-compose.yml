@@ -1,0 +1,136 @@
+# Local infrastructure and services for the Event-Driven Order Platform.
+#
+#   docker compose up -d                 everything
+#   docker compose up -d kafka postgres  infrastructure only, run the services from your IDE
+#
+# Copy .env.example to .env first; every value below has a default so the stack also comes up
+# without one.
+#
+# NOTE: Docker was not available in the environment this file was written in, so this stack has
+# not been brought up. Treat it as reviewed-but-unverified.
+
+name: event-driven-order-platform
+
+services:
+
+  # Kafka in KRaft mode: one process acting as both broker and controller, no ZooKeeper.
+  kafka:
+    image: apache/kafka:3.9.1
+    container_name: edop-kafka
+    ports:
+      # Only the host listener is published. Services on the compose network use kafka:9092.
+      - "${KAFKA_HOST_PORT:-29092}:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      CLUSTER_ID: "${KAFKA_CLUSTER_ID:-5L6g3nShT-eMCtK--X86sw}"
+
+      # Two client listeners on purpose. A container resolves the broker as kafka:9092; your
+      # machine resolves it as localhost:29092. Advertising only one of them is the classic
+      # "works from the host, times out from a container" misconfiguration.
+      KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+
+      # Single-node cluster: nothing can be replicated more than once.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: edop-postgres
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-platform}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-platform}"
+      # init.sql creates the second database; POSTGRES_DB creates the first.
+      POSTGRES_DB: orderdb
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/10-create-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-platform} -d orderdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  order-service:
+    build:
+      context: ./order-service
+    container_name: edop-order-service
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${ORDER_SERVICE_PORT:-8080}:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8080
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DATASOURCE_URL: jdbc:postgresql://postgres:5432/orderdb
+      DATASOURCE_USERNAME: "${POSTGRES_USER:-platform}"
+      DATASOURCE_PASSWORD: "${POSTGRES_PASSWORD:-platform}"
+      KAFKA_CONSUMER_GROUP: order-service-group
+      OUTBOX_POLL_INTERVAL_MS: "${OUTBOX_POLL_INTERVAL_MS:-1000}"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+    restart: unless-stopped
+
+  inventory-service:
+    build:
+      context: ./inventory-service
+    container_name: edop-inventory-service
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${INVENTORY_SERVICE_PORT:-8082}:8082"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8082
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DATASOURCE_URL: jdbc:postgresql://postgres:5432/inventorydb
+      DATASOURCE_USERNAME: "${POSTGRES_USER:-platform}"
+      DATASOURCE_PASSWORD: "${POSTGRES_PASSWORD:-platform}"
+      KAFKA_CONSUMER_GROUP: inventory-service-group
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+    restart: unless-stopped
+
+  # Optional: a browser view of the topics, consumer groups and dead-letter topics.
+  #   docker compose --profile tools up -d kafka-ui
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: edop-kafka-ui
+    profiles: ["tools"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "${KAFKA_UI_PORT:-8090}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+
+volumes:
+  kafka-data:
+  postgres-data:

@@ -1,25 +1,23 @@
 package com.vivek.platform.order.events;
 
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
-public class OrderCreatedEvent {
+/**
+ * Published by order-service on {@code order-created-topic} when an order is accepted.
+ *
+ * <p>{@code eventId} is the de-duplication key: consumers record it and skip redeliveries.
+ */
+public record OrderCreatedEvent(
+        UUID eventId,
+        UUID orderId,
+        String sku,
+        int quantity,
+        BigDecimal amount,
+        Instant occurredAt) {
 
-    private UUID orderId;
-    private Double amount;
-
-    public UUID getOrderId() {
-        return orderId;
-    }
-
-    public void setOrderId(UUID orderId) {
-        this.orderId = orderId;
-    }
-
-    public Double getAmount() {
-        return amount;
-    }
-
-    public void setAmount(Double amount) {
-        this.amount = amount;
+    public static OrderCreatedEvent of(UUID orderId, String sku, int quantity, BigDecimal amount) {
+        return new OrderCreatedEvent(UUID.randomUUID(), orderId, sku, quantity, amount, Instant.now());
     }
 }

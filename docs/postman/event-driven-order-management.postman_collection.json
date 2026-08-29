@@ -1,0 +1,282 @@
+{
+  "info": {
+    "_postman_id": "8509ff28-018c-420d-a51f-02130856b649",
+    "name": "Event-Driven Order Platform",
+    "description": "Every request here maps to an endpoint that exists in the code.\n\nWalkthrough order:\n1. Inventory > Create stock item\n2. Orders > Create order (saves the returned id into the `orderId` variable)\n3. Orders > Get order by id  - PENDING, then CONFIRMED once inventory answers\n4. Inventory > Get item by SKU  - units have moved from available to reserved\n5. Orders > Cancel order  - releases the reservation again",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "orderBaseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "inventoryBaseUrl",
+      "value": "http://localhost:8082",
+      "type": "string"
+    },
+    {
+      "key": "sku",
+      "value": "SKU-LAPTOP-01",
+      "type": "string"
+    },
+    {
+      "key": "orderId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Inventory",
+      "item": [
+        {
+          "name": "Create stock item",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"availableQuantity\": 100\n}"
+            },
+            "url": {
+              "raw": "{{inventoryBaseUrl}}/api/inventory",
+              "host": ["{{inventoryBaseUrl}}"],
+              "path": ["api", "inventory"]
+            },
+            "description": "201 Created. 409 if the SKU already exists."
+          },
+          "response": []
+        },
+        {
+          "name": "List stock items",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{inventoryBaseUrl}}/api/inventory",
+              "host": ["{{inventoryBaseUrl}}"],
+              "path": ["api", "inventory"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get item by SKU",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{inventoryBaseUrl}}/api/inventory/{{sku}}",
+              "host": ["{{inventoryBaseUrl}}"],
+              "path": ["api", "inventory", "{{sku}}"]
+            },
+            "description": "404 for an unknown SKU."
+          },
+          "response": []
+        },
+        {
+          "name": "Update available stock",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"availableQuantity\": 250\n}"
+            },
+            "url": {
+              "raw": "{{inventoryBaseUrl}}/api/inventory/{{sku}}",
+              "host": ["{{inventoryBaseUrl}}"],
+              "path": ["api", "inventory", "{{sku}}"]
+            },
+            "description": "Replaces the sellable quantity. Reserved units are left untouched."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete stock item",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{inventoryBaseUrl}}/api/inventory/{{sku}}",
+              "host": ["{{inventoryBaseUrl}}"],
+              "path": ["api", "inventory", "{{sku}}"]
+            },
+            "description": "204 No Content."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "Create order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('orderId', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"quantity\": 2,\n  \"amount\": 1499.99\n}"
+            },
+            "url": {
+              "raw": "{{orderBaseUrl}}/api/orders",
+              "host": ["{{orderBaseUrl}}"],
+              "path": ["api", "orders"]
+            },
+            "description": "201 Created with a Location header. The order comes back PENDING; it becomes CONFIRMED or REJECTED once inventory-service answers."
+          },
+          "response": []
+        },
+        {
+          "name": "Get order by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBaseUrl}}/api/orders/{{orderId}}",
+              "host": ["{{orderBaseUrl}}"],
+              "path": ["api", "orders", "{{orderId}}"]
+            },
+            "description": "404 for an unknown id."
+          },
+          "response": []
+        },
+        {
+          "name": "List orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBaseUrl}}/api/orders",
+              "host": ["{{orderBaseUrl}}"],
+              "path": ["api", "orders"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List orders by status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBaseUrl}}/api/orders?status=CONFIRMED",
+              "host": ["{{orderBaseUrl}}"],
+              "path": ["api", "orders"],
+              "query": [{ "key": "status", "value": "CONFIRMED" }]
+            },
+            "description": "status is one of PENDING, CONFIRMED, REJECTED, CANCELLED."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel order",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{orderBaseUrl}}/api/orders/{{orderId}}/cancel?reason=customer changed their mind",
+              "host": ["{{orderBaseUrl}}"],
+              "path": ["api", "orders", "{{orderId}}", "cancel"],
+              "query": [{ "key": "reason", "value": "customer changed their mind" }]
+            },
+            "description": "Legal from PENDING and CONFIRMED. Cancelling a CONFIRMED order queues a compensating OrderCancelled event that releases the stock. 409 if the order is already terminal."
+          },
+          "response": []
+        },
+        {
+          "name": "Create order - validation failure",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"\",\n  \"quantity\": 0,\n  \"amount\": -5.00\n}"
+            },
+            "url": {
+              "raw": "{{orderBaseUrl}}/api/orders",
+              "host": ["{{orderBaseUrl}}"],
+              "path": ["api", "orders"]
+            },
+            "description": "400 with an RFC 7807 problem body and a per-field `errors` object."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Operations",
+      "item": [
+        {
+          "name": "Order service health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBaseUrl}}/actuator/health",
+              "host": ["{{orderBaseUrl}}"],
+              "path": ["actuator", "health"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Order service metrics (Prometheus)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{orderBaseUrl}}/actuator/prometheus",
+              "host": ["{{orderBaseUrl}}"],
+              "path": ["actuator", "prometheus"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Inventory service health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{inventoryBaseUrl}}/actuator/health",
+              "host": ["{{inventoryBaseUrl}}"],
+              "path": ["actuator", "health"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Inventory service metrics (Prometheus)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{inventoryBaseUrl}}/actuator/prometheus",
+              "host": ["{{inventoryBaseUrl}}"],
+              "path": ["actuator", "prometheus"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
